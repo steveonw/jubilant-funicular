@@ -1,7 +1,9 @@
 import unittest
 import warnings
 from datetime import date, datetime, timezone
+from io import BytesIO
 from unittest.mock import patch
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from federal_register import NormalizedChunk, NormalizedPolicyDocument
 from models import InformationType, PiiRedactionStatus, StepKind, VerificationStatus
@@ -573,6 +575,66 @@ class ResponseSourceTests(unittest.TestCase):
                 )
         self.assertTrue(requested_sizes)
 
+    def test_docket_document_discovery_pages_beyond_first_250_rows(self) -> None:
+        calls: list[int] = []
+
+        def fake_get_json(path, *, api_key, params=None, timeout=30):
+            del api_key, timeout
+            params = params or {}
+            if path == "/documents":
+                page = params.get("page[number]", 1)
+                calls.append(page)
+                if page == 1:
+                    return {
+                        "data": [
+                            {"attributes": {"objectId": f"OBJ-{index:03d}"}}
+                            for index in range(1, 251)
+                        ],
+                        "meta": {"totalElements": 251},
+                    }
+                if page == 2:
+                    return {
+                        "data": [{"attributes": {"objectId": "OBJ-251"}}],
+                        "meta": {"totalElements": 251},
+                    }
+                raise AssertionError(f"unexpected document page {page}")
+            if path == "/comments":
+                object_id = params["filter[commentOnId]"]
+                if params.get("page[size]") == 5:
+                    return {
+                        "data": [{"id": f"{object_id}-COUNT"}],
+                        "meta": {"totalElements": 1},
+                    }
+                return {
+                    "data": [{"id": f"{object_id}-COMMENT-1"}],
+                    "meta": {"totalElements": 1},
+                }
+            raise AssertionError(f"unexpected path {path}")
+
+        def fake_fetch(comment_id, *, api_key, timeout):
+            del api_key, timeout
+            return ResponseRecord(
+                id=comment_id,
+                title=comment_id,
+                text=f"Text for {comment_id}.",
+                information_type=InformationType.PUBLIC_OPINION,
+            )
+
+        with (
+            patch("response_sources._get_json", side_effect=fake_get_json),
+            patch("response_sources._fetch_comment_record", side_effect=fake_fetch),
+        ):
+            result = fetch_comments_for_docket_with_report(
+                "DEMO-DOCKET",
+                api_key="test-key",
+                max_comments=1,
+                sampling_method="random",
+                sampling_seed=7,
+            )
+
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(result.report.source_document_count, 251)
+
     def test_random_comment_sampling_changes_with_seed(self) -> None:
         def fake_get_json(path, *, api_key, params=None, timeout=30):
             del api_key, timeout
@@ -994,6 +1056,15 @@ class ExtractionQualityTests(unittest.TestCase):
     Ligatures are repairable. Lost spacing is not, so it has to be visible
     rather than silently feeding unusable text to redaction and citation.
     """
+
+    def test_docx_expansion_is_bounded_before_xml_parse(self) -> None:
+        payload = BytesIO()
+        with ZipFile(payload, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", b"x" * 1000)
+
+        with patch("response_sources.MAX_ATTACHMENT_BYTES", 100):
+            with self.assertRaisesRegex(ValueError, "decompression safety limit"):
+                _extract_attachment_payload(payload.getvalue(), "docx")
 
     def test_ligatures_are_normalized(self) -> None:
         payload = "the term is de\ufb01ned and e\ufb00ective".encode()
