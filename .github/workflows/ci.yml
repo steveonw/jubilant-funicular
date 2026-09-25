@@ -1,0 +1,246 @@
+name: PolicyTrace CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Run full backend test suite
+        run: python -m unittest discover -s backend -p "test_*.py"
+
+      - name: Verify temporary API-key provider tests
+        run: python backend/test_openai_client.py
+
+      - name: Verify OpenRouter provider tests
+        run: python backend/test_openrouter_client.py
+
+      - name: Validate shared sample
+        run: python backend/validate_sample.py
+
+      - name: Verify offline ingestion
+        run: |
+          python backend/ingest_federal_register.py \
+            --offline \
+            --output /tmp/policytrace-offline-normalized.json
+
+      - name: Verify offline evidence demo
+        run: |
+          python backend/build_evidence_demo.py \
+            --offline \
+            --output /tmp/policytrace-offline-evidence.json
+
+      - name: Verify offline Policy Interpreter
+        run: |
+          python backend/run_policy_interpreter.py \
+            --offline \
+            --output /tmp/policytrace-offline-interpreter.json
+
+      - name: Verify offline Response & Viewpoint Analyst
+        run: |
+          python backend/run_response_analysis.py \
+            --offline \
+            --output /tmp/policytrace-offline-response.json
+
+      - name: Validate offline Response & Viewpoint output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/policytrace-offline-response.json").read_text(encoding="utf-8")
+          )
+          assert len(data["steps"]) == 2
+          assert data["steps"][0]["kind"] == "public_response"
+          assert data["steps"][1]["kind"] == "themes_viewpoints"
+          assert data["evidence"]
+
+          claims = [
+              claim
+              for step in data["steps"]
+              for claim in step["claims"]
+          ]
+          assert claims
+          assert all(
+              claim["information_type"] == "ai_interpretation"
+              for claim in claims
+          )
+          assert all(
+              claim["verification_status"] == "needs_human_review"
+              for claim in claims
+          )
+          assert "not a representative sample" in data["steps"][0]["ai_output"]
+
+          source_map = {source["id"]: source for source in data["sources"]}
+          for item in data["evidence"]:
+              source = source_map[item["source_id"]]
+              assert source["raw_text"][item["start_offset"]:item["end_offset"]] == item["snippet"]
+
+          print("Offline Response & Viewpoint Analyst verified.")
+          PY
+
+      - name: Verify offline Claim Verifier
+        run: |
+          python backend/run_claim_verifier.py \
+            --offline \
+            --input /tmp/policytrace-offline-interpreter.json \
+            --output /tmp/policytrace-offline-verified.json
+
+      - name: Verify offline Guided Mode begin and Next
+        run: |
+          python backend/run_guided_review.py begin \
+            --input /tmp/policytrace-offline-verified.json \
+            --output /tmp/policytrace-guided.json
+
+          python backend/run_guided_review.py next \
+            --input /tmp/policytrace-guided.json
+
+      - name: Validate offline Guided Mode state
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/policytrace-guided.json").read_text(encoding="utf-8")
+          )
+          assert data["mode"] == "guided"
+          assert data["steps"][0]["human_review"]["status"] == "reviewed"
+          assert data["current_step_id"] == data["steps"][1]["id"]
+          assert data["steps"][1]["human_review"]["status"] == "in_review"
+          assert data["final_review_status"] == "not_reviewed"
+          print("Offline Guided Mode state verified.")
+          PY
+
+      - name: Verify offline Rush Mode
+        run: |
+          python backend/run_rush_analysis.py run \
+            --offline \
+            --output /tmp/policytrace-rush.json
+
+      - name: Validate offline Rush Mode state
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/policytrace-rush.json").read_text(encoding="utf-8")
+          )
+          assert data["mode"] == "rush"
+          assert data["current_step_id"] is None
+          assert data["final_review_status"] == "in_review"
+          assert data["steps"][-1]["kind"] == "verification"
+          assert all(
+              step["human_review"]["status"] == "not_reviewed"
+              for step in data["steps"]
+          )
+          kinds = {step["kind"] for step in data["steps"]}
+          assert "policy_understanding" in kinds
+          assert "public_response" in kinds
+          assert "themes_viewpoints" in kinds
+          assert "verification" in kinds
+          print("Offline Rush Mode final-review gate verified.")
+          PY
+
+      - name: Validate offline Claim Verifier output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/policytrace-offline-verified.json").read_text(encoding="utf-8")
+          )
+          verification = data["steps"][-1]
+          assert verification["kind"] == "verification"
+          assert data["current_step_id"] == "step-verification"
+
+          claims = [
+              claim
+              for step in data["steps"]
+              if step["kind"] != "verification"
+              for claim in step["claims"]
+          ]
+          assert claims
+          assert all(
+              claim["verification_status"] == "supported"
+              for claim in claims
+          )
+          assert all(
+              claim["verification_note"].startswith("Semantic verification:")
+              for claim in claims
+          )
+          print("Offline Claim Verifier verified.")
+          PY
+
+      - name: Validate offline Policy Interpreter output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/policytrace-offline-interpreter.json").read_text(encoding="utf-8")
+          )
+          assert len(data["steps"]) == 4
+          assert data["evidence"]
+
+          claims = [
+              claim
+              for step in data["steps"]
+              for claim in step["claims"]
+          ]
+          assert claims
+          assert all(
+              claim["information_type"] == "ai_interpretation"
+              for claim in claims
+          )
+          assert all(
+              claim["verification_status"] == "needs_human_review"
+              for claim in claims
+          )
+
+          print("Offline Policy Interpreter verified.")
+          PY
+
+      - name: Validate offline evidence offsets and locator
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/policytrace-offline-evidence.json").read_text(encoding="utf-8")
+          )
+          sources = {source["id"]: source for source in data["sources"]}
+          evidence = data["evidence"]
+          assert evidence
+
+          for item in evidence:
+              source = sources[item["source_id"]]
+              start = item["start_offset"]
+              end = item["end_offset"]
+              assert source["raw_text"][start:end] == item["snippet"]
+              assert item["locator"]
+              assert "chars " in item["locator"]
+
+          print("Offline evidence fixture verified.")
+          PY

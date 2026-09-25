@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local generated demo outputs
+data/federal-register/*.normalized.json
+data/evidence/*.chunk3-demo.json
+data/response-analysis/*.chunk5-analysis.json
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local secrets / environment files
+.env
+.env.*
+!.env.example
+
+# Local PolicyTrace runtime logs
+.policytrace/

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PolicyTrace</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark">PolicyTrace</span>
+      <span class="tagline">Every finding traced to the source text</span>
+      <span id="build-marker" class="build-marker">build 27</span>
+    </div>
+    <div class="topbar-right">
+      <span id="mode-pill" class="pill">not started</span>
+      <button id="recent-errors" type="button" class="ghost">Recent errors</button>
+      <button id="restart" type="button" class="ghost">Start over</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <dialog id="error-dialog" class="error-dialog">
+    <div class="col-head">
+      <h2>Recent errors</h2>
+      <button id="close-errors" type="button" class="ghost">Close</button>
+    </div>
+    <p id="error-log-file" class="muted small"></p>
+    <pre id="error-log-text"></pre>
+  </dialog>
+
+  <main id="stage">
+    <section id="start-screen" class="start">
+      <h1>Find a policy, choose sources, then review</h1>
+      <p class="lede">
+        Build the source package first. PolicyTrace does not spend model calls
+        on document search or workload checks; analysis starts only when you confirm the package.
+      </p>
+
+      <details class="sources" open>
+        <summary>Policy Intake / Source Builder</summary>
+
+        <div class="field-group">
+          <h3>1. Where the AI runs</h3>
+          <p class="muted small">
+            Credentials stay in this server's memory and are never written to
+            disk or sent anywhere except the provider you name.
+          </p>
+          <div class="fields">
+            <label>Provider
+              <select id="provider-kind">
+                <option value="deterministic">Built-in sample (no AI, no key)</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="openai">OpenAI-compatible</option>
+                <option value="foundry">Microsoft Foundry</option>
+              </select>
+            </label>
+            <label data-for="openrouter openai foundry">Model
+              <input id="provider-model" type="text" placeholder="e.g. openai/gpt-4o-mini" />
+            </label>
+            <label data-for="foundry">Foundry endpoint
+              <input id="provider-endpoint" type="text"
+                     placeholder="https://your-resource.services.ai.azure.com/..." />
+            </label>
+            <label data-for="openrouter openai">Base URL (optional)
+              <input id="provider-base-url" type="text" placeholder="leave blank for the default" />
+            </label>
+            <label data-for="openrouter openai foundry">API key
+              <input id="provider-key" type="password" placeholder="kept in this server's memory" />
+            </label>
+            <label data-for="foundry">Bearer token
+              <input id="provider-bearer" type="password"
+                     placeholder="use this instead of an API key, not both" />
+            </label>
+            <label>Regulations.gov key
+              <input id="regs-key" type="password" placeholder="needed only for live comments" />
+            </label>
+            <label>Media Cloud key (optional)
+              <input id="mediacloud-key" type="password"
+                     placeholder="historical news search; kept in memory only" />
+            </label>
+          </div>
+          <p id="provider-help" class="muted small"></p>
+          <button id="save-provider" type="button">Save settings</button>
+          <span id="provider-state" class="muted small"></span>
+        </div>
+
+        <div class="field-group">
+          <h3>2. Find or enter a Federal Register document</h3>
+          <div class="fields">
+            <label>Search by title, topic, agency, RIN, or words
+              <input id="policy-search-query" type="text"
+                     placeholder="e.g. H-1B modernization or advanced AI reporting" />
+            </label>
+            <label>Or enter a document number
+              <input id="intake-doc-number" type="text" placeholder="2024-20529" />
+            </label>
+          </div>
+          <label class="inline-check">
+            <input id="include-notices-search" type="checkbox" />
+            Include Federal Register notices in search results
+          </label>
+          <div class="button-row">
+            <button id="search-policies" type="button">Search Federal Register</button>
+            <button id="select-doc-number" type="button" class="secondary-button">
+              Select document number
+            </button>
+          </div>
+          <p class="muted small">
+            Search uses FederalRegister.gov metadata. AI topic previews are optional
+            and use only a bounded excerpt from the official document.
+          </p>
+          <div id="policy-search-results" class="intake-results"></div>
+        </div>
+
+        <div id="intake-builder" class="field-group" hidden>
+          <h3>3. Build the analysis package</h3>
+          <div id="selected-policy-summary" class="selected-policy-summary"></div>
+
+          <div class="intake-grid">
+            <label class="check-card">
+              <input id="include-status" type="checkbox" checked />
+              <span><strong>Include current status / later actions</strong><br />
+              Selection checks official metadata for freshness and relationships;
+              this controls whether that context is added to final outputs.</span>
+            </label>
+
+            <label class="check-card">
+              <input id="include-comments" type="checkbox" checked />
+              <span><strong>Public comments</strong><br />
+              Analyze a bounded Regulations.gov comment sample.</span>
+            </label>
+
+            <label class="check-card">
+              <input id="include-news" type="checkbox" checked />
+              <span><strong>Related media</strong><br />
+              Discover source pointers for the media review section.</span>
+            </label>
+
+            <label class="check-card">
+              <input id="include-comparison" type="checkbox" />
+              <span><strong>Revision comparison</strong><br />
+              Compare one related Federal Register document.</span>
+            </label>
+          </div>
+
+          <div class="fields">
+            <label>Regulations.gov docket
+              <select id="detected-docket" hidden></select>
+              <input id="intake-docket-id" type="text"
+                     placeholder="auto-detected only when explicitly linked" />
+              <span id="docket-detection-note" class="muted small"></span>
+            </label>
+            <label>Comments to analyze
+              <input id="intake-max-comments" type="number" min="1" max="100" value="12" />
+            </label>
+            <label>Comment sampling
+              <select id="comment-sampling-method">
+                <option value="random" selected>Random — reproducible spread</option>
+                <option value="earliest">Earliest — legacy order</option>
+              </select>
+              <span class="muted small">
+                Random sampling records a seed and draws across the submitted-comment
+                population. It does not make regulatory comments representative of the public.\n                Random mode supports direct paging for up to 5,000 comments per source document.\n              </span>
+            </label>
+            <label>Sampling seed
+              <input id="comment-sampling-seed" type="number" min="0" step="1"
+                     placeholder="generated automatically" />
+              <span class="muted small">
+                Leave blank to generate a seed. Saved projects and the audit log keep it for reproducibility.
+              </span>
+            </label>
+            <label>Media query (optional)
+              <input id="intake-news-query" type="text"
+                     placeholder="leave blank to derive from the policy title" />
+            </label>
+            <label>Media results
+              <input id="intake-max-news" type="number" min="1" max="25" value="8" />
+            </label>
+          </div>
+
+          <h4>Related / comparable official documents</h4>
+          <p class="muted small">
+            Suggestions explain why they appeared. Same-RIN relationships are stronger;
+            fallback suggestions require meaningful title/topic overlap; same agency alone is not enough.
+          </p>
+          <div id="related-documents" class="intake-results"></div>
+
+          <div class="fields">
+            <label>Comparison document (optional)
+              <input id="intake-comparison-doc" type="text"
+                     placeholder="select a suggestion or enter a document number" />
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="check-workload" type="button" class="secondary-button">
+              Check comparison workload
+            </button>
+          </div>
+          <div id="workload-summary" class="workload-summary" hidden></div>
+
+          <label>Report evidence standard
+            <select id="report-standard">
+              <option value="strict">Strict — supported findings only</option>
+              <option value="balanced" selected>Balanced — supported + partly supported</option>
+              <option value="exploratory">Exploratory — also surface unresolved evidence-backed findings separately</option>
+            </select>
+          </label>
+          <p class="muted small">
+            This controls report inclusion only. It never changes the verifier's actual result.
+          </p>
+
+          <div class="project-actions">
+            <button id="save-project" type="button" class="secondary-button">Save project JSON</button>
+            <button id="load-project" type="button" class="secondary-button">Load project JSON</button>
+            <input id="project-file" type="file" accept="application/json,.json" hidden />
+          </div>
+          <p class="muted small">
+            Project files save document/source choices, not API keys, tokens, or other credentials.
+          </p>
+
+          <button id="start-rush" type="button" class="choice intake-start">
+            <span class="choice-title">Analyze everything, then review</span>
+            <span class="choice-body">
+              Run the selected source package, then stop for human review before final approval.
+            </span>
+          </button>
+        </div>
+
+        <details class="advanced-sources">
+          <summary>Advanced / manual source controls</summary>
+
+        <div class="field-group">
+          <h3>Manual policy load</h3>
+          <div class="fields">
+            <label>Federal Register document number
+              <input id="doc-number" type="text" placeholder="2024-20529" value="2024-20529" />
+            </label>
+          </div>
+          <button id="load-policy" type="button">Load and analyze this policy</button>
+          <div class="revision-control">
+            <label>Compare with another Federal Register document
+              <input id="revision-doc-number" type="text"
+                     placeholder="enter a different document number" />
+            </label>
+            <button id="compare-revision" type="button">Compare policy versions</button>
+            <p class="muted small">
+              Deterministic text comparison only. PolicyTrace flags changed source
+              language and claim IDs that may need refresh; it does not infer legal effect.
+            </p>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h3>3. Public comments</h3>
+          <div class="fields">
+            <label>Regulations.gov docket
+              <input id="docket-id" type="text" placeholder="BIS-2024-0047" />
+            </label>
+            <label>How many comments
+              <input id="max-comments" type="number" min="1" max="100" value="12" />
+            </label>
+          </div>
+          <button id="load-comments" type="button">Load and analyze comments</button>
+          <p class="muted small">
+            Supported email and phone patterns are redacted before analysis.
+            Exact-text duplicate submissions are clustered for corpus reporting;
+            similar-but-not-identical form letters may remain separate.
+          </p>
+        </div>
+
+        <div class="field-group">
+          <h3>4. Related factual reporting</h3>
+          <div class="fields">
+            <label>News query (optional)
+              <input id="news-query" type="text"
+                     placeholder="leave blank to derive from the policy title" />
+            </label>
+            <label>How many articles
+              <input id="max-news" type="number" min="1" max="25" value="8" />
+            </label>
+          </div>
+          <button id="discover-news" type="button">Find related reporting</button>
+          <p class="muted small">
+            PolicyTrace tries Media Cloud historical search when a key is configured,
+            then GDELT recent discovery, then Google News RSS as a best-effort fallback.
+            Headlines and metadata are pointers, not verified factual claims.
+          </p>
+        </div>
+
+        <p id="source-state" class="source-state">
+          No live sources selected yet. Search for a policy or enter a Federal Register document number.
+        </p>
+        </details>
+      </details>
+    </section>
+
+    <section id="workspace" class="workspace" hidden>
+      <div class="policy-head">
+        <h1 id="policy-title">&nbsp;</h1>
+        <p id="policy-meta" class="muted"></p>
+      </div>
+
+      <section id="policy-status-card" class="status-card" hidden>
+        <div class="col-head">
+          <h2>Current status / freshness</h2>
+          <span id="policy-status-health" class="pill"></span>
+        </div>
+        <div id="policy-status-metrics" class="status-metrics"></div>
+        <p id="policy-status-warning" class="status-warning"></p>
+        <p id="policy-status-detail" class="muted small"></p>
+        <a id="policy-status-link" href="#" target="_blank" rel="noopener" hidden>
+          Open official status source
+        </a>
+      </section>
+
+      <section id="revision-card" class="revision-card" hidden>
+        <div class="col-head">
+          <h2>Revision comparison</h2>
+          <span id="revision-health" class="pill"></span>
+        </div>
+        <div id="revision-metrics" class="revision-metrics"></div>
+        <p id="revision-warning" class="status-warning"></p>
+        <p id="revision-detail" class="muted small"></p>
+        <div class="revision-toolbar" aria-label="Revision filters">
+          <button type="button" data-revision-filter="substantive" class="active">Substantive</button>
+          <button type="button" data-revision-filter="threshold">Thresholds</button>
+          <button type="button" data-revision-filter="date">Dates</button>
+          <button type="button" data-revision-filter="stakeholder">Stakeholders</button>
+          <button type="button" data-revision-filter="text">Text</button>
+          <button type="button" data-revision-filter="all">All</button>
+        </div>
+        <p id="revision-shown" class="muted small"></p>
+        <div id="revision-changes" class="revision-changes"></div>
+        <button id="revision-show-more" type="button" class="secondary-button" hidden>
+          Show more
+        </button>
+      </section>
+
+      <section id="news-card" class="news-card" hidden>
+        <div class="col-head">
+          <h2>Related factual reporting</h2>
+          <span id="news-health" class="pill"></span>
+        </div>
+        <div id="news-metrics" class="news-metrics"></div>
+        <p id="news-warning" class="status-warning"></p>
+        <p id="news-detail" class="muted small"></p>
+        <div id="news-list" class="news-list"></div>
+      </section>
+
+      <section id="corpus-card" class="corpus-card" hidden>
+        <div class="col-head">
+          <h2>Corpus & limitations</h2>
+          <span id="corpus-health" class="pill"></span>
+        </div>
+        <div id="corpus-metrics" class="corpus-metrics"></div>
+        <p id="corpus-warning" class="corpus-warning"></p>
+        <p id="corpus-detail" class="muted small"></p>
+      </section>
+
+      <div id="review-columns" class="columns">
+        <aside class="col sections">
+          <h2>Sections</h2>
+          <div id="section-list"></div>
+        </aside>
+
+        <section class="col findings">
+          <div class="col-head">
+            <h2 id="section-title">Findings</h2>
+            <span id="section-status" class="pill"></span>
+          </div>
+          <p id="section-note" class="muted small"></p>
+          <div id="claim-list"></div>
+        </section>
+
+        <aside class="col evidence">
+          <h2>Where this comes from</h2>
+          <div id="evidence-list">
+            <p class="empty">Select a finding to see the source text it came from.</p>
+          </div>
+        </aside>
+      </div>
+
+      <footer id="review-actionbar" class="actionbar">
+        <div class="actionbar-state">
+          <span class="label">Your review</span>
+          <strong id="review-state">not started</strong>
+        </div>
+        <div id="actions" class="actions"></div>
+      </footer>
+    </section>
+
+    <section id="brief-screen" class="brief" hidden>
+      <div class="col-head">
+        <h1 id="report-title">Leadership Report</h1>
+        <div>
+          <button id="back-to-work" type="button" class="ghost">Back to review</button>
+          <button id="save-project-final" type="button" class="ghost">Save project JSON</button>
+          <button id="copy-brief" type="button">Copy report</button>
+          <button id="approve-brief" type="button" class="primary">Approve leadership report</button>
+        </div>
+      </div>
+
+      <div class="report-tabs" role="tablist" aria-label="Final outputs">
+        <button id="show-leadership" type="button" class="report-tab active">
+          Leadership Report
+        </button>
+        <button id="show-audit" type="button" class="report-tab">
+          Evidence Audit Log
+        </button>
+      </div>
+
+      <p id="report-description" class="muted">
+        A concise leadership-facing report assembled only from reviewed,
+        evidence-backed findings. Claim IDs link every line to the audit log.
+      </p>
+      <p id="brief-notice" class="brief-notice" hidden></p>
+      <pre id="brief-text"></pre>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
