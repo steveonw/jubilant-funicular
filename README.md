@@ -234,6 +234,14 @@ The older `frontend/demo/` / legacy demo path is retained only as historical ref
 
 ---
 
+## AI-assisted development disclosure
+
+PolicyTrace was developed with **AI-assisted coding** as part of the implementation process.
+
+AI tools were used to help draft, review, debug, and refine portions of the code and documentation. The project was still directed and tested by the team, with human decisions controlling the product design, evidence rules, review workflow, integrations, and final contest submission.
+
+The live application, Microsoft Foundry integration, evidence-verification workflow, human-review gates, and final outputs were tested as part of the project rather than presented as unverified generated code.
+
 ## Development history
 
 This repository is the clean, judge-facing mirror.
