@@ -101,6 +101,37 @@ The current product UI is served from `frontend/app/`.
 
 The older `frontend/demo/` and `backend/api.py` path are retained only as historical/reference material and are **not** the current contest application.
 
+## Frontend architecture
+
+PolicyTrace deliberately uses a lightweight browser frontend instead of a large JavaScript framework.
+
+The current product UI lives in:
+
+- `frontend/app/index.html` — page structure and controls
+- `frontend/app/styles.css` — visual styling
+- `frontend/app/app.js` — browser interactions and API calls
+
+The frontend is served by the Python application entry point:
+
+```bash
+python backend/run_app.py
+```
+
+That server exposes the same tested backend review and analysis rules used by the application and serves `frontend/app/` at:
+
+```text
+http://127.0.0.1:8777/
+```
+
+This setup was intentional for the contest build:
+
+- it keeps the demo portable and easy to run locally;
+- judges can inspect the HTML, CSS, JavaScript, and Python directly in the repository;
+- the browser UI talks to the backend over HTTP rather than duplicating verification or approval rules in client-side code;
+- the backend remains the authority for review gates, refusals, evidence checks, and final approval behavior.
+
+The frontend therefore focuses on presenting the workflow clearly — source intake, findings, evidence, reviewer actions, Leadership Report, and Evidence Audit Log — while the Python backend enforces the actual analysis and review logic.
+
 ## Microsoft Foundry
 
 For the exact configuration used in the live validation, see:
