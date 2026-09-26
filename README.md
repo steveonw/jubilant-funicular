@@ -201,7 +201,7 @@ The live contest validation used:
 
 - **Provider:** Microsoft Foundry
 - **Model / deployment:** `gpt-5-mini`
-- **Resource endpoint:** `https://policytrance.services.ai.azure.com`
+- **Resource endpoint:** `https://<your-resource>.services.ai.azure.com`
 - **Authentication used in rehearsal:** API key
 
 > The `policytrance` endpoint spelling is intentional.
