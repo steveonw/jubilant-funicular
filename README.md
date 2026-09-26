@@ -261,4 +261,4 @@ The PowerPoint and video are part of the contest submission package. If the Powe
 
 ## Product principle
 
-> **PolicyTrace is not designed to make AI the final authority. It is designed to make AI output inspectable, evidence-grounded, and reviewable by a human.**
+> **You do not have to trust the AI - here is the evidence trail..**
